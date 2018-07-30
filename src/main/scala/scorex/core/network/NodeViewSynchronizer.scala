@@ -243,6 +243,28 @@ MR <: MempoolReader[TX] : ClassTag]
       }
   }
 
+  private def processExpectedModifier(remote: ConnectedPeer, id: ModifierId, pmod: PMOD) = {
+    if (modifiersCache.contains(pmod.id) || historyReaderOpt.exists(_.contains(pmod))) {
+      // should never be here
+      log.error(s"Received modifier ${pmod.encodedId} that is already in cache or history.")
+    } else {
+      historyReaderOpt match {
+        case Some(hr) =>
+          hr.applicableTry(pmod) match {
+            case Failure(e) if e.isInstanceOf[MalformedModifierError] =>
+              log.warn(s"Modifier ${pmod.encodedId} is permanently invalid", e)
+              deliveryTracker.toInvalid(id)
+              penalizeMisbehavingPeer(remote)
+            case _ =>
+              modifiersCache.put(pmod.id, pmod)
+          }
+        case None =>
+          log.error("Got modifier while history reader is not ready")
+          modifiersCache.put(pmod.id, pmod)
+      }
+    }
+  }
+
   /**
     * Logic to process modifiers got from another peer
     */
@@ -284,33 +306,15 @@ MR <: MempoolReader[TX] : ClassTag]
               case Success(tx: TX@unchecked) if tx.modifierTypeId == Transaction.ModifierTypeId =>
                 viewHolderRef ! LocallyGeneratedTransaction[TX](tx)
               case Success(pmod: PMOD@unchecked) =>
-                if (modifiersCache.contains(pmod.id) || historyReaderOpt.exists(_.contains(pmod))) {
-                  // should never be here
-                  log.error(s"Received modifier ${pmod.encodedId} that is already in cache or history.")
-                } else {
-                  historyReaderOpt match {
-                    case Some(hr) =>
-                      hr.applicableTry(pmod) match {
-                        case Failure(e) if e.isInstanceOf[MalformedModifierError] =>
-                          log.warn(s"Modifier ${pmod.encodedId} is permanently invalid", e)
-                          deliveryTracker.toInvalid(id)
-                          penalizeMisbehavingPeer(remote)
-                        case _ =>
-                          modifiersCache.put(pmod.id, pmod)
-                      }
-                    case None =>
-                      log.error("Got modifier while history reader is not ready")
-                      modifiersCache.put(pmod.id, pmod)
-
-                  }
-                }
+                processExpectedModifier(remote,                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         , pmod)
             }
           }
           if (typeId != Transaction.ModifierTypeId) {
             modifiersCache.cleanOverfull().foreach(removed => deliveryTracker.toUnknown(removed.id))
             viewHolderRef ! ChangedCache[PMOD, HR, ModifiersCache[PMOD, HR]](modifiersCache)
           }
-        case None => log.error(s"Undefined serializer for modifier of type $typeId")
+        case None =>
+          log.error(s"Undefined serializer for modifier of type $typeId")
       }
   }
 
